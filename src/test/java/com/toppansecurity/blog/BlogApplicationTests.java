@@ -29,7 +29,10 @@ class BlogApplicationTests {
 		var openApiResponse = get(client, "/v3/api-docs");
 		assertEquals(200, openApiResponse.statusCode());
 		JsonNode openApi = objectMapper.readTree(openApiResponse.body());
-		assertEquals("bearerAuth", openApi.at("/paths/~1api~1posts/get/security/0").fieldNames().next());
+		var publicPostsSecurity = openApi.at("/paths/~1api~1posts/get/security");
+		assertTrue(publicPostsSecurity.isMissingNode() || publicPostsSecurity.isEmpty());
+		assertEquals("bearerAuth",
+				openApi.at("/paths/~1api~1me~1posts/get/security/0").fieldNames().next());
 		assertEquals("http", openApi.at("/components/securitySchemes/bearerAuth/type").asText());
 		var postListParameters = openApi.at("/paths/~1api~1posts/get/parameters");
 		for (String parameter : new String[] { "page", "size", "sort", "direction" }) {
@@ -59,7 +62,9 @@ class BlogApplicationTests {
 	@Test
 	void registrationAndLoginIssueBearerTokenForProtectedEndpoints() throws Exception {
 		var client = HttpClient.newHttpClient();
-		assertEquals(401, get(client, "/api/posts").statusCode());
+		var publicPostsResponse = get(client, "/api/posts");
+		assertEquals(200, publicPostsResponse.statusCode());
+		assertEquals(0, objectMapper.readTree(publicPostsResponse.body()).get("page").get("totalElements").asInt());
 
 		var registerResponse = post(client, "/api/auth/register",
 				"""
@@ -67,6 +72,24 @@ class BlogApplicationTests {
 						""");
 		assertEquals(201, registerResponse.statusCode());
 		assertEquals("USER", objectMapper.readTree(registerResponse.body()).get("role").asText());
+
+		var invalidRegistration = post(client, "/api/auth/register",
+				"""
+						{"email":"invalid-password@example.com","displayName":"Invalid Password","password":"Temam@123"}
+						""");
+		assertEquals(400, invalidRegistration.statusCode());
+		JsonNode validationError = objectMapper.readTree(invalidRegistration.body());
+		assertEquals("Request validation failed", validationError.get("message").asText());
+		assertEquals("password", validationError.get("fieldErrors").get(0).get("field").asText());
+
+		var registerWithStaleToken = client.send(HttpRequest.newBuilder(uri("/api/auth/register"))
+				.header(HttpHeaders.CONTENT_TYPE, "application/json")
+				.header(HttpHeaders.AUTHORIZATION, "Bearer expired-or-invalid-token")
+				.POST(HttpRequest.BodyPublishers.ofString("""
+						{"email":"another-writer@example.com","displayName":"Another Writer","password":"correct-horse-battery"}
+						"""))
+				.build(), HttpResponse.BodyHandlers.ofString());
+		assertEquals(201, registerWithStaleToken.statusCode());
 
 		var loginResponse = post(client, "/api/auth/login",
 				"""
@@ -77,6 +100,48 @@ class BlogApplicationTests {
 		assertEquals("Bearer", tokenResponse.get("tokenType").asText());
 		String token = tokenResponse.get("accessToken").asText();
 		assertNotNull(token);
+
+		var createDraftPost = client.send(HttpRequest.newBuilder(uri("/api/posts"))
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+				.header(HttpHeaders.CONTENT_TYPE, "application/json")
+				.POST(HttpRequest.BodyPublishers.ofString("""
+						{"title":"Draft Access Control Systems","slug":"draft-access-control-systems","content":"Private draft content"}
+						"""))
+				.build(), HttpResponse.BodyHandlers.ofString());
+		assertEquals(201, createDraftPost.statusCode());
+		assertEquals("DRAFT", objectMapper.readTree(createDraftPost.body()).get("status").asText());
+		assertEquals(404, get(client, "/api/posts/draft-access-control-systems").statusCode());
+
+		var createPublishedPost = client.send(HttpRequest.newBuilder(uri("/api/posts"))
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+				.header(HttpHeaders.CONTENT_TYPE, "application/json")
+				.POST(HttpRequest.BodyPublishers.ofString("""
+						{"title":"Access Control Systems","slug":"importance-of-access-control-systems-2","content":"Publicly available blog content","status":"PUBLISHED"}
+						"""))
+				.build(), HttpResponse.BodyHandlers.ofString());
+		assertEquals(201, createPublishedPost.statusCode());
+
+		var publicPostsWithContent = get(client, "/api/posts?page=0&size=20&sort=CREATED_AT&direction=DESC");
+		assertEquals(200, publicPostsWithContent.statusCode());
+		assertTrue(objectMapper.readTree(publicPostsWithContent.body()).get("content").toString()
+				.contains("importance-of-access-control-systems-2"));
+
+		var publicPostBySlug = get(client, "/api/posts/importance-of-access-control-systems-2");
+		assertEquals(200, publicPostBySlug.statusCode());
+		assertEquals("importance-of-access-control-systems-2",
+				objectMapper.readTree(publicPostBySlug.body()).get("slug").asText());
+		var publicPostComments = get(client, "/api/posts/importance-of-access-control-systems-2/comments");
+		assertEquals(200, publicPostComments.statusCode());
+
+		var createComment = client.send(HttpRequest.newBuilder(
+				uri("/api/posts/importance-of-access-control-systems-2/comments"))
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+				.header(HttpHeaders.CONTENT_TYPE, "application/json")
+				.POST(HttpRequest.BodyPublishers.ofString("""
+						{"content":"A comment on the published post"}
+						"""))
+				.build(), HttpResponse.BodyHandlers.ofString());
+		assertEquals(201, createComment.statusCode());
 
 		var protectedResponse = client.send(HttpRequest.newBuilder(uri("/api/me/posts"))
 				.header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
@@ -104,6 +169,7 @@ class BlogApplicationTests {
 				.GET()
 				.build(), HttpResponse.BodyHandlers.ofString());
 		assertEquals(400, invalidPageSize.statusCode());
+		assertEquals(400, objectMapper.readTree(invalidPageSize.body()).get("status").asInt());
 	}
 
 	private boolean hasParameter(JsonNode parameters, String name) {

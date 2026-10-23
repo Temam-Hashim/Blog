@@ -1,5 +1,11 @@
 package com.toppansecurity.blog.config;
 
+import java.io.IOException;
+import java.io.Reader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Properties;
+
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,8 +22,11 @@ public class AdminBootstrap {
 	ApplicationRunner createBootstrapAdmin(UserRepository users, PasswordEncoder passwordEncoder,
 			org.springframework.core.env.Environment environment) {
 		return args -> {
-			var email = environment.getProperty("BLOG_ADMIN_EMAIL", "").trim();
-			var password = environment.getProperty("BLOG_ADMIN_PASSWORD", "");
+			var localProperties = loadLocalProperties();
+			var email = localProperties.getProperty("BLOG_ADMIN_EMAIL",
+					environment.getProperty("BLOG_ADMIN_EMAIL", "")).trim();
+			var password = localProperties.getProperty("BLOG_ADMIN_PASSWORD",
+					environment.getProperty("BLOG_ADMIN_PASSWORD", ""));
 			if (email.isEmpty() && password.isEmpty()) {
 				return;
 			}
@@ -37,5 +46,19 @@ public class AdminBootstrap {
 			}
 			users.save(new BlogUser(normalizedEmail, "Administrator", passwordEncoder.encode(password), Role.ADMIN));
 		};
+	}
+
+	private Properties loadLocalProperties() {
+		var properties = new Properties();
+		var envFile = Path.of(".env");
+		if (!Files.isRegularFile(envFile)) {
+			return properties;
+		}
+		try (Reader reader = Files.newBufferedReader(envFile)) {
+			properties.load(reader);
+			return properties;
+		} catch (IOException exception) {
+			throw new IllegalStateException("Unable to read the project .env file", exception);
+		}
 	}
 }

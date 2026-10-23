@@ -13,7 +13,8 @@ separate user/admin roles. PostgreSQL stores application data; Flyway manages th
 
 1. Create a PostgreSQL database named `blog` and note its username and password.
 2. Edit the root `.env` file with your local values. Spring Boot imports this file when the app starts from the
-   project root. It is ignored by Git; never commit it.
+   project root. The admin bootstrap reads its two credentials directly from `.env`, so stale PowerShell variables
+   cannot override the local admin password. The file is ignored by Git; never commit it.
 
    ```dotenv
    DATABASE_URL=jdbc:postgresql://localhost:5432/blog
@@ -50,7 +51,13 @@ separate user/admin roles. PostgreSQL stores application data; Flyway manages th
 
 Registration is public. Login returns a JWT access token that expires after 15 minutes. Paste the token into
 Swagger's **Authorize** dialog; Swagger sends it as a bearer token for protected operations. The auth endpoints,
-Swagger UI, and OpenAPI document are public; other API endpoints require a valid token.
+Swagger UI, OpenAPI document, and GET routes for published posts and their comments are public. Other API endpoints
+require a valid token. Draft posts are only returned in the authenticated author's `/api/me/posts` list or admin
+post listing; the public slug and comment routes only resolve published posts.
+
+API errors use a consistent JSON response with a timestamp, HTTP status, error name, message, request path, and
+`fieldErrors` array. Validation failures include the affected field and validation message; unexpected server
+errors are logged and return a generic message without exposing internal details.
 
 ### Main endpoints
 
@@ -58,9 +65,9 @@ Swagger UI, and OpenAPI document are public; other API endpoints require a valid
 | --- | --- | --- |
 | `POST` | `/api/auth/register` | Public; creates a `USER` |
 | `POST` | `/api/auth/login` | Public; returns a JWT |
-| `GET` | `/api/posts` | Authenticated; lists published posts |
-| `GET` | `/api/posts/{slug}` | Authenticated; reads a published post |
-| `GET` | `/api/posts/{slug}/comments` | Authenticated; lists comments |
+| `GET` | `/api/posts` | Public; lists published posts |
+| `GET` | `/api/posts/{slug}` | Public; reads a published post |
+| `GET` | `/api/posts/{slug}/comments` | Public; lists comments |
 | `POST` | `/api/posts` | Authenticated; creates a post |
 | `GET` | `/api/me/posts` | Authenticated; lists your posts |
 | `PUT` / `DELETE` | `/api/me/posts/{id}` | Post author or admin |

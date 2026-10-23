@@ -30,7 +30,6 @@ import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/api")
-@SecurityRequirement(name = "bearerAuth")
 public class PostController {
 	private final PostService posts;
 	private final CommentService comments;
