@@ -1,0 +1,11 @@
+# Run the app
+.\mvnw.cmd spring-boot:run
+
+# Run tests
+.\mvnw.cmd test
+
+# Build/package the app without running tests
+.\mvnw.cmd -DskipTests package
+
+# Build and run verification, including tests
+.\mvnw.cmd verify
