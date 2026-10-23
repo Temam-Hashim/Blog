@@ -83,6 +83,14 @@ class BlogApplicationTests {
 				.GET()
 				.build(), HttpResponse.BodyHandlers.ofString());
 		assertEquals(200, protectedResponse.statusCode());
+		JsonNode pagedResponseBody = objectMapper.readTree(protectedResponse.body());
+		assertTrue(pagedResponseBody.has("content"));
+		assertTrue(pagedResponseBody.has("page"));
+		assertTrue(pagedResponseBody.get("page").has("number"));
+		assertTrue(pagedResponseBody.get("page").has("size"));
+		assertTrue(pagedResponseBody.get("page").has("totalElements"));
+		assertTrue(pagedResponseBody.get("page").has("totalPages"));
+		assertTrue(!pagedResponseBody.has("pageable"));
 
 		var pagedResponse = client.send(HttpRequest.newBuilder(
 				uri("/api/me/posts?page=0&size=1&sort=TITLE&direction=ASC&status=DRAFT"))
